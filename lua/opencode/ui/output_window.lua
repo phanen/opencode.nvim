@@ -382,7 +382,7 @@ function M.get_open_fold_starts(win, buf)
 end
 
 ---Set the folds for the output buffer
----@param fold_ranges table<{from: number, to: number}>
+---@param fold_ranges {from: number, to: number}[]
 function M.set_folds(fold_ranges)
   local windows = state.windows
   if not M.mounted() then
