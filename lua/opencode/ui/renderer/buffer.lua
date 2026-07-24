@@ -480,7 +480,10 @@ function M.upsert_part_now(part_id, message_id, formatted_data, previous_formatt
     apply_part_render_data(part_id, formatted_data, cached.line_start)
 
     if new_line_end ~= cached.line_end then
+      local delta = new_line_end - old_line_end
       ctx.render_state:update_part_lines(part_id, cached.line_start, new_line_end)
+      output_window.shift_folds(old_line_end + 1, delta)
+      ctx.render_state:shift_all(old_line_end + 1, delta)
     end
     apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len, true)
 
