@@ -625,6 +625,8 @@ function M.append_part_now(part_id, extra_lines, extra_extmarks, previous_format
 
   local new_line_end = cached.line_end + #extra_lines
   ctx.render_state:update_part_lines(part_id, cached.line_start, new_line_end)
+  output_window.shift_folds(insert_at, #extra_lines)
+  ctx.render_state:shift_all(insert_at, #extra_lines)
 
   local formatted_data = ctx.formatted_parts[part_id]
   if formatted_data then
