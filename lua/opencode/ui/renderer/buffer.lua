@@ -133,9 +133,8 @@ local function apply_extmarks(
   prefix_len,
   skip_clear
 )
-  local clear_start, clear_end = extmark_clear_range(
-    previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len
-  )
+  local clear_start, clear_end =
+    extmark_clear_range(previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len)
   if not skip_clear then
     output_window.clear_extmarks(clear_start, clear_end)
   end
@@ -161,9 +160,8 @@ local function apply_appended_extmarks(
   new_line_end,
   prefix_len
 )
-  local clear_start, clear_end = extmark_clear_range(
-    previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len
-  )
+  local clear_start, clear_end =
+    extmark_clear_range(previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len)
   clear_start = math.max(clear_start, old_line_end + 1)
   if clear_start >= clear_end then
     return
@@ -193,14 +191,8 @@ local function write_in_place(cached, previous_formatted, formatted_data)
   local prefix_len = diff.unchanged_prefix_lines(previous_formatted, formatted_data)
   local write_start = cached.line_start + prefix_len
   local lines_to_write = diff.slice_lines(formatted_data.lines, prefix_len + 1)
-  local clear_start, clear_end = extmark_clear_range(
-    previous_formatted,
-    formatted_data,
-    cached.line_start,
-    old_line_end,
-    new_line_end,
-    prefix_len
-  )
+  local clear_start, clear_end =
+    extmark_clear_range(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len)
 
   output_window.clear_extmarks(clear_start, clear_end)
   output_window.set_lines(lines_to_write, write_start, cached.line_end + 1)
@@ -422,8 +414,7 @@ function M.upsert_message_now(message_id, formatted_data, previous_formatted)
 
   local cached = ctx.render_state:get_message(message_id)
   if cached and cached.line_start and cached.line_end then
-    local prefix_len, old_line_end, new_line_end =
-      write_in_place(cached, previous_formatted, formatted_data)
+    local prefix_len, old_line_end, new_line_end = write_in_place(cached, previous_formatted, formatted_data)
 
     apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len, true)
     ctx.render_state:set_message(cached.message, cached.line_start, new_line_end)
@@ -484,8 +475,7 @@ function M.upsert_part_now(part_id, message_id, formatted_data, previous_formatt
 
   local cached = ctx.render_state:get_part(part_id)
   if cached and cached.line_start and cached.line_end then
-    local prefix_len, old_line_end, new_line_end =
-      write_in_place(cached, previous_formatted, formatted_data)
+    local prefix_len, old_line_end, new_line_end = write_in_place(cached, previous_formatted, formatted_data)
 
     apply_part_render_data(part_id, formatted_data, cached.line_start)
 
@@ -630,7 +620,12 @@ function M.append_part_now(part_id, extra_lines, extra_extmarks, previous_format
     apply_part_render_data(part_id, formatted_data, cached.line_start)
     local prefix_len = diff.unchanged_prefix_lines(previous_formatted, formatted_data)
     apply_appended_extmarks(
-      previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len
+      previous_formatted,
+      formatted_data,
+      cached.line_start,
+      old_line_end,
+      new_line_end,
+      prefix_len
     )
     if formatted_data.fold_ranges then
       M.update_part_folds(part_id)
