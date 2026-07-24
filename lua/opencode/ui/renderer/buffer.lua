@@ -433,11 +433,9 @@ end
 ---@param formatted_data Output
 ---@param line_start integer
 local function apply_part_render_data(part_id, formatted_data, line_start)
+  ctx.render_state:clear_actions(part_id)
   if has_actions(formatted_data.actions) then
-    ctx.render_state:clear_actions(part_id)
     ctx.render_state:add_actions(part_id, vim.deepcopy(formatted_data.actions), line_start)
-  else
-    ctx.render_state:clear_actions(part_id)
   end
 
   ctx.render_state:clear_targets(part_id)
