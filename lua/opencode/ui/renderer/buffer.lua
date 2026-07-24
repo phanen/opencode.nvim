@@ -1,6 +1,7 @@
 local ctx = require('opencode.ui.renderer.ctx')
 local state = require('opencode.state')
 local output_window = require('opencode.ui.output_window')
+local diff = require('opencode.ui.renderer.output_diff')
 
 local M = {}
 
@@ -68,50 +69,6 @@ local function has_actions(actions)
   return type(actions) == 'table' and #actions > 0
 end
 
----@param previous_formatted Output|nil
----@param formatted_data Output
----@return integer
-local function unchanged_prefix_len(previous_formatted, formatted_data)
-  local previous_lines = previous_formatted and previous_formatted.lines or {}
-  local next_lines = formatted_data and formatted_data.lines or {}
-  local prefix_len = 0
-
-  for i = 1, math.min(#previous_lines, #next_lines) do
-    if previous_lines[i] ~= next_lines[i] then
-      break
-    end
-    prefix_len = i
-  end
-
-  return prefix_len
-end
-
----@param lines string[]|nil
----@param start_idx integer
----@return string[]
-local function slice_lines(lines, start_idx)
-  local slice = {}
-  for i = start_idx, #(lines or {}) do
-    slice[#slice + 1] = lines[i]
-  end
-  return slice
-end
-
----@param extmarks table<number, OutputExtmark[]>|nil
----@param start_line integer
----@return table<number, OutputExtmark[]>
-local function slice_extmarks(extmarks, start_line)
-  local slice = {}
-  for line_idx, marks in pairs(extmarks or {}) do
-    if line_idx < 0 then
-      slice[line_idx] = vim.deepcopy(marks)
-    elseif line_idx >= start_line then
-      slice[line_idx - start_line] = vim.deepcopy(marks)
-    end
-  end
-  return slice
-end
-
 ---@param folds table<{from: number, to: number}>|nil
 ---@param start_line integer
 ---@return table<{from: number, to: number}>
@@ -128,71 +85,6 @@ local function slice_folds(folds, start_line)
   return slice
 end
 
----@param mark OutputExtmark|fun(): OutputExtmark
----@return OutputExtmark
-local function resolve_mark(mark)
-  return type(mark) == 'function' and mark() or mark
-end
-
----@param a (OutputExtmark|fun(): OutputExtmark)[]|nil
----@param b (OutputExtmark|fun(): OutputExtmark)[]|nil
----@return boolean
-local function marks_equal(a, b)
-  a = a or {}
-  b = b or {}
-
-  if #a ~= #b then
-    return false
-  end
-
-  for i = 1, #a do
-    if not vim.deep_equal(resolve_mark(a[i]), resolve_mark(b[i])) then
-      return false
-    end
-  end
-
-  return true
-end
-
----@param previous_formatted Output|nil
----@param formatted_data Output
----@return integer
-local function unchanged_extmark_prefix_len(previous_formatted, formatted_data)
-  local previous_extmarks = previous_formatted and previous_formatted.extmarks or {}
-  local next_extmarks = formatted_data and formatted_data.extmarks or {}
-
-  for line_idx, _ in pairs(previous_extmarks) do
-    if line_idx < 0 and not marks_equal(previous_extmarks[line_idx], next_extmarks[line_idx]) then
-      return 0
-    end
-  end
-
-  for line_idx, _ in pairs(next_extmarks) do
-    if line_idx < 0 and not marks_equal(previous_extmarks[line_idx], next_extmarks[line_idx]) then
-      return 0
-    end
-  end
-
-  local previous_lines = previous_formatted and previous_formatted.lines or {}
-  local next_lines = formatted_data and formatted_data.lines or {}
-  local max_lines = math.max(#previous_lines, #next_lines)
-  local prefix_len = 0
-
-  for line_idx = 0, math.max(max_lines - 1, 0) do
-    local previous_marks = previous_formatted and previous_formatted.extmarks and previous_formatted.extmarks[line_idx]
-      or nil
-    local next_marks = formatted_data and formatted_data.extmarks and formatted_data.extmarks[line_idx] or nil
-
-    if not marks_equal(previous_marks, next_marks) then
-      break
-    end
-
-    prefix_len = line_idx + 1
-  end
-
-  return prefix_len
-end
-
 ---@param start_line integer
 ---@param lines string[]
 local function highlight_written_lines(start_line, lines)
@@ -202,56 +94,40 @@ local function highlight_written_lines(start_line, lines)
   output_window.highlight_changed_lines(start_line, start_line + #lines - 1)
 end
 
+---Compute the [clear_start, clear_end) buffer-line range whose extmarks
+---need to be wiped before re-applying the new set.
 ---@param previous_formatted Output|nil
 ---@param formatted_data Output
 ---@param line_start integer
 ---@param old_line_end integer
 ---@param new_line_end integer
+---@param prefix_len integer  already-computed unchanged line prefix from caller
 ---@return integer clear_start
 ---@return integer clear_end
-local function extmark_clear_range(previous_formatted, formatted_data, line_start, old_line_end, new_line_end)
-  local prefix_len = math.min(
-    unchanged_prefix_len(previous_formatted, formatted_data),
-    unchanged_extmark_prefix_len(previous_formatted, formatted_data)
-  )
+local function extmark_clear_range(
+  previous_formatted,
+  formatted_data,
+  line_start,
+  old_line_end,
+  new_line_end,
+  prefix_len
+)
+  local effective_prefix = math.min(prefix_len, diff.unchanged_prefix_extmarks(previous_formatted, formatted_data))
 
-  ---@param formatted Output|nil
-  ---@return integer|nil
-  local function min_extmark_line(formatted)
-    local min_line = nil
-    for line_idx in pairs(formatted and formatted.extmarks or {}) do
-      if min_line == nil or line_idx < min_line then
-        min_line = line_idx
-      end
-    end
-    return min_line
+  local clear_start = line_start + effective_prefix
+  local previous_min = diff.min_extmark_line(previous_formatted)
+  local next_min = diff.min_extmark_line(formatted_data)
+  if previous_min ~= nil then
+    clear_start = math.min(clear_start, line_start + previous_min)
   end
-
-  ---@param formatted Output|nil
-  ---@param fallback integer
-  ---@return integer
-  local function max_extmark_line(formatted, fallback)
-    local max_line = fallback
-    for line_idx in pairs(formatted and formatted.extmarks or {}) do
-      max_line = math.max(max_line, line_start + line_idx)
-    end
-    return max_line
-  end
-
-  local clear_start = line_start + prefix_len
-  local previous_min_extmark = min_extmark_line(previous_formatted)
-  local next_min_extmark = min_extmark_line(formatted_data)
-  if previous_min_extmark ~= nil then
-    clear_start = math.min(clear_start, line_start + previous_min_extmark)
-  end
-  if next_min_extmark ~= nil then
-    clear_start = math.min(clear_start, line_start + next_min_extmark)
+  if next_min ~= nil then
+    clear_start = math.min(clear_start, line_start + next_min)
   end
 
   clear_start = math.max(0, clear_start)
   local clear_end = math.max(
-    max_extmark_line(previous_formatted, old_line_end),
-    max_extmark_line(formatted_data, new_line_end)
+    diff.max_extmark_line(previous_formatted, old_line_end - line_start) + line_start,
+    diff.max_extmark_line(formatted_data, new_line_end - line_start) + line_start
   ) + 1
 
   return clear_start, clear_end
@@ -262,16 +138,26 @@ end
 ---@param line_start integer
 ---@param old_line_end integer
 ---@param new_line_end integer
+---@param prefix_len integer
 ---@param skip_clear? boolean
-local function apply_extmarks(previous_formatted, formatted_data, line_start, old_line_end, new_line_end, skip_clear)
-  local clear_start, clear_end =
-    extmark_clear_range(previous_formatted, formatted_data, line_start, old_line_end, new_line_end)
+local function apply_extmarks(
+  previous_formatted,
+  formatted_data,
+  line_start,
+  old_line_end,
+  new_line_end,
+  prefix_len,
+  skip_clear
+)
+  local clear_start, clear_end = extmark_clear_range(
+    previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len
+  )
   if not skip_clear then
     output_window.clear_extmarks(clear_start, clear_end)
   end
 
   local extmark_start_line = math.max(0, clear_start - line_start)
-  local extmarks = slice_extmarks(formatted_data.extmarks, extmark_start_line)
+  local extmarks = diff.slice_extmarks(formatted_data.extmarks, extmark_start_line)
   if has_extmarks(extmarks) then
     output_window.set_extmarks(extmarks, clear_start)
   end
@@ -282,9 +168,18 @@ end
 ---@param line_start integer
 ---@param old_line_end integer
 ---@param new_line_end integer
-local function apply_appended_extmarks(previous_formatted, formatted_data, line_start, old_line_end, new_line_end)
-  local clear_start, clear_end =
-    extmark_clear_range(previous_formatted, formatted_data, line_start, old_line_end, new_line_end)
+---@param prefix_len integer
+local function apply_appended_extmarks(
+  previous_formatted,
+  formatted_data,
+  line_start,
+  old_line_end,
+  new_line_end,
+  prefix_len
+)
+  local clear_start, clear_end = extmark_clear_range(
+    previous_formatted, formatted_data, line_start, old_line_end, new_line_end, prefix_len
+  )
   clear_start = math.max(clear_start, old_line_end + 1)
   if clear_start >= clear_end then
     return
@@ -293,10 +188,41 @@ local function apply_appended_extmarks(previous_formatted, formatted_data, line_
   output_window.clear_extmarks(clear_start, clear_end)
 
   local extmark_start_line = math.max(0, clear_start - line_start)
-  local extmarks = slice_extmarks(formatted_data.extmarks, extmark_start_line)
+  local extmarks = diff.slice_extmarks(formatted_data.extmarks, extmark_start_line)
   if has_extmarks(extmarks) then
     output_window.set_extmarks(extmarks, clear_start)
   end
+end
+
+---Shared in-place upsert path: compute prefix/write range, clear stale extmarks,
+---write the tail of `formatted_data.lines` into the buffer at `cached.line_start`.
+---Returns the dimensions the caller needs to apply extmarks and update render_state.
+---@param cached {line_start: integer, line_end: integer}
+---@param previous_formatted Output|nil
+---@param formatted_data Output
+---@return integer prefix_len
+---@return integer old_line_end
+---@return integer new_line_end
+local function write_in_place(cached, previous_formatted, formatted_data)
+  local old_line_end = cached.line_end
+  local new_line_end = cached.line_start + #formatted_data.lines - 1
+  local prefix_len = diff.unchanged_prefix_lines(previous_formatted, formatted_data)
+  local write_start = cached.line_start + prefix_len
+  local lines_to_write = diff.slice_lines(formatted_data.lines, prefix_len + 1)
+  local clear_start, clear_end = extmark_clear_range(
+    previous_formatted,
+    formatted_data,
+    cached.line_start,
+    old_line_end,
+    new_line_end,
+    prefix_len
+  )
+
+  output_window.clear_extmarks(clear_start, clear_end)
+  output_window.set_lines(lines_to_write, write_start, cached.line_end + 1)
+  highlight_written_lines(write_start, lines_to_write)
+
+  return prefix_len, old_line_end, new_line_end
 end
 
 ---@param message_id string
@@ -512,24 +438,10 @@ function M.upsert_message_now(message_id, formatted_data, previous_formatted)
 
   local cached = ctx.render_state:get_message(message_id)
   if cached and cached.line_start and cached.line_end then
-    local old_line_end = cached.line_end
-    local prefix_len = unchanged_prefix_len(previous_formatted, formatted_data)
-    local write_start = cached.line_start + prefix_len
-    local lines_to_write = slice_lines(formatted_data.lines, prefix_len + 1)
-    local clear_start, clear_end = extmark_clear_range(
-      previous_formatted,
-      formatted_data,
-      cached.line_start,
-      old_line_end,
-      cached.line_start + #formatted_data.lines - 1
-    )
+    local prefix_len, old_line_end, new_line_end =
+      write_in_place(cached, previous_formatted, formatted_data)
 
-    output_window.clear_extmarks(clear_start, clear_end)
-    output_window.set_lines(lines_to_write, write_start, cached.line_end + 1)
-    highlight_written_lines(write_start, lines_to_write)
-
-    local new_line_end = cached.line_start + #formatted_data.lines - 1
-    apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, true)
+    apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len, true)
     ctx.render_state:set_message(cached.message, cached.line_start, new_line_end)
 
     local delta = new_line_end - old_line_end
@@ -588,29 +500,15 @@ function M.upsert_part_now(part_id, message_id, formatted_data, previous_formatt
 
   local cached = ctx.render_state:get_part(part_id)
   if cached and cached.line_start and cached.line_end then
-    local old_line_end = cached.line_end
-    local prefix_len = unchanged_prefix_len(previous_formatted, formatted_data)
-    local write_start = cached.line_start + prefix_len
-    local lines_to_write = slice_lines(formatted_data.lines, prefix_len + 1)
-    local clear_start, clear_end = extmark_clear_range(
-      previous_formatted,
-      formatted_data,
-      cached.line_start,
-      old_line_end,
-      cached.line_start + #formatted_data.lines - 1
-    )
+    local prefix_len, old_line_end, new_line_end =
+      write_in_place(cached, previous_formatted, formatted_data)
 
-    output_window.clear_extmarks(clear_start, clear_end)
-    output_window.set_lines(lines_to_write, write_start, cached.line_end + 1)
-    highlight_written_lines(write_start, lines_to_write)
-
-    local new_line_end = cached.line_start + #formatted_data.lines - 1
     apply_part_render_data(part_id, formatted_data, cached.line_start)
 
     if new_line_end ~= cached.line_end then
       ctx.render_state:update_part_lines(part_id, cached.line_start, new_line_end)
     end
-    apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, true)
+    apply_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len, true)
 
     if formatted_data.fold_ranges and #formatted_data.fold_ranges > 0 then
       M.update_part_folds(part_id)
@@ -746,7 +644,10 @@ function M.append_part_now(part_id, extra_lines, extra_extmarks, previous_format
   local formatted_data = ctx.formatted_parts[part_id]
   if formatted_data then
     apply_part_render_data(part_id, formatted_data, cached.line_start)
-    apply_appended_extmarks(previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end)
+    local prefix_len = diff.unchanged_prefix_lines(previous_formatted, formatted_data)
+    apply_appended_extmarks(
+      previous_formatted, formatted_data, cached.line_start, old_line_end, new_line_end, prefix_len
+    )
     if formatted_data.fold_ranges then
       M.update_part_folds(part_id)
     end
