@@ -441,7 +441,6 @@ function M.shift_folds(start_line, delta)
   if not windows or not windows.output_buf then
     return
   end
-  local buf = windows.output_buf
   local fold_state = state.ui.get_output_folds()
   local folds = fold_state.ranges
 
