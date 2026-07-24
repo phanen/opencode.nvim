@@ -599,11 +599,12 @@ end
 ---@param start_line integer
 ---@param end_line integer
 function M.highlight_changed_lines(start_line, end_line)
-  local windows = state.windows
-  if not windows or not windows.output_buf or not vim.api.nvim_buf_is_valid(windows.output_buf) then
+  if not config.debug.highlight_changed_lines then
     return
   end
-  if not config.debug.highlight_changed_lines then
+
+  local windows = state.windows
+  if not windows or not windows.output_buf or not vim.api.nvim_buf_is_valid(windows.output_buf) then
     return
   end
 
