@@ -69,22 +69,6 @@ local function has_actions(actions)
   return type(actions) == 'table' and #actions > 0
 end
 
----@param folds table<{from: number, to: number}>|nil
----@param start_line integer
----@return table<{from: number, to: number}>
-local function slice_folds(folds, start_line)
-  local slice = {}
-  for i, range in ipairs(folds or {}) do
-    if range.from >= start_line then
-      table.insert(slice, {
-        from = range.from - start_line,
-        to = range.to - start_line,
-      })
-    end
-  end
-  return slice
-end
-
 ---@param start_line integer
 ---@param lines string[]
 local function highlight_written_lines(start_line, lines)
