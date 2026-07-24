@@ -657,6 +657,7 @@ function M.remove_part_now(part_id)
   local cached = ctx.render_state:get_part(part_id)
   if not cached or not cached.line_start or not cached.line_end then
     ctx.render_state:remove_part(part_id)
+    ctx.part_folds[part_id] = nil
     return
   end
 
@@ -664,7 +665,9 @@ function M.remove_part_now(part_id)
   output_window.set_lines({}, cached.line_start, cached.line_end + 1)
   local delta = -(cached.line_end - cached.line_start + 1)
   output_window.shift_folds(cached.line_start, delta)
+  ctx.render_state:shift_all(cached.line_start, delta)
   ctx.render_state:remove_part(part_id)
+  ctx.part_folds[part_id] = nil
 end
 
 ---@param message_id string
@@ -686,6 +689,7 @@ function M.remove_message_now(message_id)
   output_window.set_lines({}, cached.line_start, cached.line_end + 1)
   local delta = -(cached.line_end - cached.line_start + 1)
   output_window.shift_folds(cached.line_start, delta)
+  ctx.render_state:shift_all(cached.line_start, delta)
   ctx.render_state:remove_message(message_id)
 end
 
